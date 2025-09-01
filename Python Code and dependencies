@@ -1,0 +1,222 @@
+ensor_reader.py)
+This script records audio and vibration data, then sends it to the backend.
+
+Python
+
+import pyaudio
+import numpy as np
+import time
+import requests
+import RPi.GPIO as GPIO
+
+# --- SENSOR CONFIGURATION ---
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+RATE = 44100
+CHUNK = 1024
+AUDIO_ENDPOINT = 'http://YOUR_SERVER_IP:5000/api/data/audio'
+VIBRATION_ENDPOINT = 'http://YOUR_SERVER_IP:5000/api/data/vibration'
+VIBRATION_SENSOR_PIN = 17 # GPIO pin for vibration sensor
+
+# --- BACKEND API KEY (FOR AUTHENTICATION) ---
+API_KEY = "YOUR_SECRET_API_KEY"
+
+# --- GPIO SETUP FOR VIBRATION SENSOR ---
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(VIBRATION_SENSOR_PIN, GPIO.IN)
+
+def record_audio_and_analyze():
+    audio = pyaudio.PyAudio()
+    stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+
+    print("Recording audio for analysis...")
+    frames = []
+    for _ in range(0, int(RATE / CHUNK * 5)):  # Record 5 seconds of audio
+        data = stream.read(CHUNK)
+        frames.append(data)
+
+    stream.stop_stream()
+    stream.close()
+    audio.terminate()
+
+    audio_data = np.frombuffer(b''.join(frames), dtype=np.int16)
+    rms_value = np.sqrt(np.mean(np.square(audio_data)))
+    
+    # Send data to backend
+    try:
+        response = requests.post(AUDIO_ENDPOINT, json={'machine_id': 'machine-001', 'rms_value': float(rms_value)}, headers={'X-Api-Key': API_KEY})
+        print(f"Audio data sent. Status: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending audio data: {e}")
+
+def monitor_vibration():
+    if GPIO.input(VIBRATION_SENSOR_PIN):
+        print("Vibration detected!")
+        vibration_level = 1 # Simple detection for now
+    else:
+        print("No vibration detected.")
+        vibration_level = 0
+    
+    # Send data to backend
+    try:
+        response = requests.post(VIBRATION_ENDPOINT, json={'machine_id': 'machine-001', 'vibration_level': vibration_level}, headers={'X-Api-Key': API_KEY})
+        print(f"Vibration data sent. Status: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending vibration data: {e}")
+
+if __name__ == "__main__":
+    while True:
+        record_audio_and_analyze()
+        monitor_vibration()
+        time.sleep(10) # Send data every 10 seconds
+2. Backend & Data Processing (Node.js/Express)
+This server receives data, analyzes it, and stores it. It's the brain of the operation.
+
+Project Structure
+acoustic-backend/
+├── server.js
+├── package.json
+├── models/
+│   └── Data.js
+├── routes/
+│   └── data.js
+└── .env
+Dependencies (package.json)
+JSON
+
+{
+  "name": "acoustic-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^8.0.0",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5"
+  }
+}
+Server (server.js)
+JavaScript
+
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const dataRoutes = require('./routes/data');
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+app.use(cors());
+app.use(express.json());
+
+// --- DATABASE CONNECTION ---
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB connection error:', err));
+
+// --- API ROUTES ---
+app.use('/api/data', dataRoutes);
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+Data Model (models/Data.js)
+JavaScript
+
+const mongoose = require('mongoose');
+
+const dataSchema = new mongoose.Schema({
+    machine_id: { type: String, required: true },
+    timestamp: { type: Date, default: Date.now },
+    rms_value: { type: Number },
+    vibration_level: { type: Number }
+});
+
+module.exports = mongoose.model('Data', dataSchema);
+Routes (routes/data.js)
+JavaScript
+
+const express = require('express');
+const router = express.Router();
+const Data = require('../models/Data');
+
+// Middleware to check for API key
+const checkApiKey = (req, res, next) => {
+    const apiKey = req.header('X-Api-Key');
+    if (apiKey === process.env.API_KEY) {
+        next();
+    } else {
+        res.status(401).send('Unauthorized: Invalid API Key');
+    }
+};
+
+router.post('/audio', checkApiKey, async (req, res) => {
+    try {
+        const { machine_id, rms_value } = req.body;
+        // Simple predictive logic: if RMS is high, send an alert
+        if (rms_value > 3000) { // Threshold value to be calibrated
+            console.warn(`ALERT: High acoustic noise from machine ${machine_id}. RMS: ${rms_value}`);
+            // TODO: Add logic to send email/SMS alert
+        }
+        const newData = new Data({ machine_id, rms_value });
+        await newData.save();
+        res.status(201).send('Audio data saved');
+    } catch (error) {
+        res.status(500).send(error.message);
+    }
+});
+
+router.post('/vibration', checkApiKey, async (req, res) => {
+    try {
+        const { machine_id, vibration_level } = req.body;
+        if (vibration_level === 1) {
+            console.warn(`ALERT: High vibration detected from machine ${machine_id}.`);
+        }
+        const newData = new Data({ machine_id, vibration_level });
+        await newData.save();
+        res.status(201).send('Vibration data saved');
+    } catch (error) {
+        res.status(500).send(error.message);
+    }
+});
+
+router.get('/latest/:machine_id', async (req, res) => {
+    try {
+        const latestData = await Data.find({ machine_id: req.params.machine_id }).sort({ timestamp: -1 }).limit(1);
+        res.json(latestData);
+    } catch (error) {
+        res.status(500).send(error.message);
+    }
+});
+
+module.exports = router;
+3. Front-End & Dashboard (React)
+This is a simple dashboard to visualize the data.
+
+Project Structure
+acoustic-dashboard/
+├── src/
+│   ├── App.js
+│   ├── components/
+│   │   ├── Dashboard.js
+│   │   └── DataDisplay.js
+│   └── api.js
+├── public/
+│   └── index.html
+└── package.json
+Dependencies (package.json)
+JSON
+
+{
+  "name": "acoustic-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "axios": "^1.6.2",
+    "chart.js": "^4.4.0",
+    "react-chartjs-2": "^5.2.0"
+  }
+}
