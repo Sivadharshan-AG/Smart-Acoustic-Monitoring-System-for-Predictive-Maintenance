@@ -1,0 +1,71 @@
+Dashboard Component (components/Dashboard.js)
+This component fetches data from the backend and displays it.
+
+JavaScript
+
+import React, { useEffect, useState } from 'react';
+import axios from 'axios';
+import { Line } from 'react-chartjs-2';
+import 'chart.js/auto';
+
+const API_ENDPOINT = 'http://YOUR_SERVER_IP:5000/api/data/latest/machine-001';
+
+const Dashboard = () => {
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    const fetchData = async () => {
+        try {
+            const response = await axios.get(API_ENDPOINT);
+            setData(response.data[0]);
+            setLoading(false);
+        } catch (error) {
+            console.error("Error fetching data:", error);
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchData();
+        const interval = setInterval(fetchData, 5000); // Fetch every 5 seconds
+        return () => clearInterval(interval);
+    }, []);
+
+    if (loading) return <div>Loading...</div>;
+    if (!data) return <div>No data available.</div>;
+
+    const chartData = {
+        labels: [new Date(data.timestamp).toLocaleTimeString()],
+        datasets: [
+            {
+                label: 'Acoustic RMS Value',
+                data: [data.rms_value],
+                fill: false,
+                borderColor: 'rgb(75, 192, 192)',
+                tension: 0.1
+            },
+            {
+                label: 'Vibration Level',
+                data: [data.vibration_level * 1000], // Scale for better visibility
+                fill: false,
+                borderColor: 'rgb(255, 99, 132)',
+                tension: 0.1
+            }
+        ]
+    };
+
+    return (
+        <div style={{ padding: '20px' }}>
+            <h1>Machine Health Dashboard</h1>
+            <h2>Machine ID: {data.machine_id}</h2>
+            <div style={{ height: '400px', width: '600px' }}>
+                <Line data={chartData} />
+            </div>
+            <p><strong>Latest RMS Value:</strong> {data.rms_value ? data.rms_value.toFixed(2) : 'N/A'}</p>
+            <p><strong>Vibration Detected:</strong> {data.vibration_level === 1 ? 'Yes' : 'No'}</p>
+            <p><strong>Last Updated:</strong> {new Date(data.timestamp).toLocaleString()}</p>
+        </div>
+    );
+};
+
+export default Dashboard;
