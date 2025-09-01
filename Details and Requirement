@@ -1,0 +1,16 @@
+IoT-based system that uses INMP441 MEMS Microphone and Piezoelectric Vibration Sensor to monitor machine health in real time. Detects abnormal noise and vibration patterns for predictive maintenance, reducing downtime, cutting costs, and improving worker safety in industrial environments.
+
+
+  1. Hardware & Data Collection (Raspberry Pi/ESP32 Code)
+This code runs on the IoT device. It reads data from the sensors and sends it to the backend server. We'll use Python for the Raspberry Pi.
+
+Required Components:
+Raspberry Pi
+
+INMP441 MEMS Microphone
+
+Piezoelectric Vibration Sensor (e.g., SW-420)
+
+Wi-Fi module (if not built-in)
+
+Breadboard and jumper wires
